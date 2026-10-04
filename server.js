@@ -31,6 +31,7 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
 import { createApiRoutes } from "./src/routes/apiRoutes.js";
+import { expressGuard } from "./appGuard.js";
 import { addCreatorInfo } from "./src/middleware/creatorInfo.js";
 
 // ══════════════════════════════════════════════════════════════
@@ -86,6 +87,9 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// ---- Only the AniHub app (signed requests) may use this API ----
+app.use(expressGuard);
 
 // ---- FEATURE: Security headers ----
 app.use((req, res, next) => {
