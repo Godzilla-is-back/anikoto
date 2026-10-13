@@ -39,10 +39,10 @@ const SERVER_NAME_MAP = {
 
 // Embed domain to API domain mapping
 const EMBED_API_MAP = {
-  "vidtube.site": "megaplay-1.buzz",
-  "vidplay.site": "megaplay-1.buzz",
-  "megaplay.buzz": "megaplay-1.buzz",
-  "embed.bunkrerrer.com": "megaplay-1.buzz",
+  "vidtube.site": "megaplay.buzz",
+  "vidplay.site": "megaplay.buzz",
+  "megaplay.buzz": "megaplay.buzz",
+  "embed.bunkrerrer.com": "megaplay.buzz",
 };
 
 // ---- FEATURE: Server Name Normalization ----
