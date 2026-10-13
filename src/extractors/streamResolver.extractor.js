@@ -112,7 +112,7 @@ const resolveStreamUrl = async (embedUrl, options = {}) => {
 
     // NOTE: Query the megaplay API for the actual stream URL
     const apiResponse = await axios.get(
-      `https://${apiDomain}/ajax/sources/${dataId}`,
+      `https://\( {apiDomain}/stream/getSources?id= \){dataId}&type=sub`,
       {
         headers: {
           ...headers,
