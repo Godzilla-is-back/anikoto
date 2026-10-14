@@ -268,13 +268,16 @@ const resolveStreamUrl = async (embedUrl, options = {}) => {
 
     // NOTE: Parse m3u8 qualities if it's an HLS stream (Referer = embed, then the player host)
     let qualities = [];
+    // The CDN only serves requests that carry the player's Referer - remember which one worked
+    // so the app can send the same one when it plays the stream.
+    let workingReferer = embedUrl;
     if (streamType === "hls") {
       for (const referer of [embedUrl, `https://${embedDomain}/`, `https://${apiDomain}/`, "https://anikototv.to/"]) {
         qualities = await parseM3u8Qualities(streamUrl, {
           headers: { ...headers, "Referer": referer, "Origin": new URL(referer).origin },
           timeout,
         });
-        if (qualities.length) break;
+        if (qualities.length) { workingReferer = referer; break; }
       }
     }
 
@@ -284,6 +287,8 @@ const resolveStreamUrl = async (embedUrl, options = {}) => {
     return {
       url: streamUrl,
       masterUrl: streamUrl,
+      referer: workingReferer,
+      origin: new URL(workingReferer).origin,
       type: streamType,
       qualities,
       // Flat list ready to play: every quality as its own direct link
