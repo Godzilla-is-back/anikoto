@@ -17,6 +17,7 @@
  */
 
 import axios from "axios";
+import crypto from "crypto";
 import { headers } from "../configs/header.config.js";
 
 // ══════════════════════════════════════════════════════════════
@@ -53,6 +54,40 @@ const SOURCE_ENDPOINTS = [
   (id) => `/stream/getSources?id=${id}`,
   (id) => `/ajax/sources/${id}`,
 ];
+
+// MegaPlay puts the video URL only in encrypted field `enc` (AES-256-CBC).
+const MEGAPLAY_AES_KEY = "i?LMTAx0Q6,:}50U";
+const MEGAPLAY_AES_IV = "W0;27ToaUpl_P%'c";
+
+const padKeyBytes = (str, len) => {
+  const out = Buffer.alloc(len);
+  const srcBuf = Buffer.from(String(str), "utf8");
+  srcBuf.copy(out, 0, 0, Math.min(len, srcBuf.length));
+  return out;
+};
+
+const b64UrlDecode = (input) => {
+  let s = String(input).replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4;
+  if (pad) s += "====".slice(pad);
+  return Buffer.from(s, "base64");
+};
+
+/** Decrypt MegaPlay getSources `enc` → e.g. { file: "https://…/master.m3u8" } */
+const decryptMegaPlayEnc = (enc) => {
+  if (!enc || typeof enc !== "string") return null;
+  try {
+    const decipher = crypto.createDecipheriv(
+      "aes-256-cbc",
+      padKeyBytes(MEGAPLAY_AES_KEY, 32),
+      padKeyBytes(MEGAPLAY_AES_IV, 16)
+    );
+    const pt = Buffer.concat([decipher.update(b64UrlDecode(enc)), decipher.final()]);
+    return JSON.parse(pt.toString("utf8"));
+  } catch {
+    return null;
+  }
+};
 
 // ---- FEATURE: Read the stream URL out of any known response shape ----
 /**
@@ -189,12 +224,27 @@ const resolveStreamUrl = async (embedUrl, options = {}) => {
           ? (() => { try { return JSON.parse(apiResponse.data); } catch { return {}; } })()
           : apiResponse.data;
         picked = pickSource(parsed) || scanForStream(rawBody);
+
+        // Decrypt MegaPlay `enc` when plain source fields are missing
+        if (!picked && parsed && typeof parsed.enc === "string") {
+          const decoded = decryptMegaPlayEnc(parsed.enc);
+          if (decoded) {
+            picked = pickSource(decoded);
+            if (!picked && typeof decoded.file === "string" && /^https?:\/\//i.test(decoded.file)) {
+              picked = {
+                url: decoded.file,
+                type: /\.m3u8(\?|$)/i.test(decoded.file) ? "hls" : "mp4",
+              };
+            }
+          }
+        }
+
         attempts.push({
           endpoint,
           ok: !!picked,
           status: apiResponse.status,
           contentType: String(apiResponse.headers?.["content-type"] || ""),
-          encrypted: !!(parsed && (parsed.encrypted || typeof parsed.sources === "string" && !/^https?:/i.test(parsed.sources))),
+          encrypted: !!(parsed && (parsed.enc || parsed.encrypted || (typeof parsed.sources === "string" && !/^https?:/i.test(parsed.sources)))),
           preview: rawBody.slice(0, 220),
         });
         if (picked) { apiData = parsed; break; }
