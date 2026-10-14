@@ -78,6 +78,15 @@ const pickSource = (apiData) => {
   return { url, type: type || (/\.m3u8(\?|$)/i.test(url) ? "hls" : "mp4") };
 };
 
+// ---- FEATURE: Last-resort scan for a playlist link inside any text/HTML/JSON body ----
+const scanForStream = (text) => {
+  if (typeof text !== "string" || !text) return null;
+  const clean = text.replace(/\\\//g, "/").replace(/\\u0026/g, "&");
+  const m = clean.match(/https?:\/\/[^"'\s<>\\]+\.m3u8[^"'\s<>\\]*/i)
+    || clean.match(/https?:\/\/[^"'\s<>\\]+\.mp4[^"'\s<>\\]*/i);
+  return m ? { url: m[0], type: /\.m3u8/i.test(m[0]) ? "hls" : "mp4" } : null;
+};
+
 // ---- FEATURE: Friendly quality label ----
 /** 1080 → "1080p". Heights are kept real (360p, 480p, 720p, 1080p ...); with no RESOLUTION it falls back to bandwidth. */
 const labelFor = (height, bandwidth) => {
@@ -156,9 +165,10 @@ const resolveStreamUrl = async (embedUrl, options = {}) => {
 
     // NOTE: Query the player API for the actual stream URL (tries each known endpoint)
     let apiData = null;
-    let picked = null;
+    let picked = scanForStream(embedHtml);   // some players put the link straight in the page
     const attempts = [];
-    for (const build of SOURCE_ENDPOINTS) {
+    if (picked) attempts.push({ endpoint: "embed-page-scan", ok: true });
+    for (const build of (picked ? [] : SOURCE_ENDPOINTS)) {
       const endpoint = `https://${apiDomain}${build(dataId)}`;
       try {
         const apiResponse = await axios.get(endpoint, {
@@ -170,12 +180,23 @@ const resolveStreamUrl = async (embedUrl, options = {}) => {
             "Origin": `https://${embedDomain}`,
           },
           timeout,
+          validateStatus: () => true,   // keep non-200 bodies so we can see WHY it failed
         });
+        const rawBody = typeof apiResponse.data === "string"
+          ? apiResponse.data
+          : JSON.stringify(apiResponse.data || {});
         const parsed = typeof apiResponse.data === "string"
           ? (() => { try { return JSON.parse(apiResponse.data); } catch { return {}; } })()
           : apiResponse.data;
-        picked = pickSource(parsed);
-        attempts.push({ endpoint, ok: !!picked });
+        picked = pickSource(parsed) || scanForStream(rawBody);
+        attempts.push({
+          endpoint,
+          ok: !!picked,
+          status: apiResponse.status,
+          contentType: String(apiResponse.headers?.["content-type"] || ""),
+          encrypted: !!(parsed && (parsed.encrypted || typeof parsed.sources === "string" && !/^https?:/i.test(parsed.sources))),
+          preview: rawBody.slice(0, 220),
+        });
         if (picked) { apiData = parsed; break; }
       } catch (e) {
         attempts.push({ endpoint, ok: false, error: e.message });
@@ -186,6 +207,8 @@ const resolveStreamUrl = async (embedUrl, options = {}) => {
       return {
         url: null, qualities: [], skipData: null, type: null,
         error: "Player API returned no stream URL",
+        embedUrl,
+        dataId,
         attempts,
       };
     }
